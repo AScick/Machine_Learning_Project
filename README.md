@@ -1,5 +1,5 @@
 # Machine_Learning_Project
-Bunch of exercises computed during the Machine Learning for Finance course. They cover different themes:  
+Bunch of exercises computed during the Machine Learning for Finance course. Different themes are covered:
   - KNN and OLS for digit identification problem.  
   - Logistic Regression.
   - Linear Discriminant Analysis (LDA).
