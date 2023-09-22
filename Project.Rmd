@@ -1,0 +1,568 @@
+---
+title: "Project"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+# install.packages("class")
+# install.packages("MASS")
+# install.packages("nnet")
+# install.packages("glmnet")
+library(MASS)
+require(boot)
+library("class")
+library("nnet")
+library("glmnet")
+```
+
+# Exercise 1 - KNN and OLS: the digit identification problem.
+
+The digits classification problem aims to automate the sorting of letters by zipcode. The data from this example come from the handwritten ZIP codes on envelopes from U.S. postal mail. Each image is a segment from a five digit ZIP code, isolating a single digit. The images are 16x16 eight-bit graceless maps, with each pixel ranging in intensity from 0 to 255.\
+The images have been normalized to have approximately the same size and orientation. The task is to predict, from the 16x16 matrix of pixel intensities, the identity of each image (0, 1, . . . , 9) quickly and accurately. If it is accurate enough, the resulting algorithm would be used as part of an automatic sorting procedure for envelopes. This is a classification problem for which the error rate needs to be kept very low to avoid misdirection of mail. The zipcode data are available with documentation here: <https://web.stanford.edu/~hastie/ElemStatLearn/data.html>.\
+The training data contains 7291 hand written numbers and the corresponding true identity of the number. The test data contains similar information for 2007 other numbers. The training data will be used to construct the models and the testing data will give an indication of the predictive power of the model.\
+We compare the classification performance of linear regression and k-nearest neighbor classification on the zipcode data.
+
+```{r}
+set.seed(17)
+
+path_train <- paste0(getwd(), "/zip.train.gz")
+path_test <- paste0(getwd(), "/zip.test.gz")
+
+zip_train <- read.csv(path_train, header = FALSE, sep = " ")
+zip_test <- read.csv(path_test, header = FALSE, sep = " ")
+
+
+im <- matrix(as.numeric(unlist(zip_train[4, 2:257])), nrow = 16, ncol = 16)
+```
+
+We take the fourth row, arrange the 256 numbers into a 16x16 matrix, and plot it. If we plot the values arranged in this way we get the flipped image of the digit in negative colors (black background (when -1), white digit (when 1)). So via -im we obtain a white background and black digit by doing apply(-im, 1, rev) we rotate the matrix counter clockckwise by 90 degrees and by transposing it, we obtain the correct image.
+
+```{r message=FALSE, warning=FALSE}
+image(t(apply(-im, 1, rev)), col = gray((0:32) / 32))
+```
+
+Thus, in this setting we have that the first column corresponds to our response variable, while the other columns to the predictors, because to each number corresponds a precise pixel color.\
+We keep the rows of the training set where we see that there is either 2 or 3 in the first column
+
+```{r}
+zip_train <- zip_train[zip_train[, 1] %in% c(2, 3), ]
+zip_test <- zip_test[zip_test[, 1] %in% c(2, 3), ]
+y_train <- zip_train[, 1]
+y_test <- zip_test[, 1]
+```
+
+Our first approach could be considering each observation as a vector in R\^256 and then we could compute the euclidean distance between that vector and the others to find the nearest K neighbors and then averaging the response.\
+euclidean_distance \<- function(x, y) {\
+sqrt(sum((x - y)\^2))\
+}\
+Or we could simply invoke the knn function from the class pack age.
+
+```{r}
+neighbors <- c(1, 3, 5, 7, 15)
+```
+
+Our idea was storing results into a struct, but since r does not support structs, we decided to store results in a table (each row stores the result for a different k).
+
+```{r}
+knn_results <- data.frame(k = integer(), train_error = numeric(), test_error = numeric(), stringsAsFactors = FALSE)
+
+for (i in 1:length(neighbors)) {
+    k <- neighbors[i]
+
+    train_estimate <- knn(train = zip_train[, 2:257], test = zip_train[, 2:257], cl = y_train, k = k)
+
+    test_estimate <- knn(train = zip_train[, 2:257], test = zip_test[, 2:257], cl = y_train, k = k)
+
+    knn_results <- rbind(
+        knn_results,
+        data.frame(
+            k = k,
+            train_error = 1 - sum(train_estimate == y_train) / length(y_train),
+            test_error = 1 - sum(test_estimate == y_test) / length(y_test),
+            stringsAsFactors = FALSE
+        )
+    )
+}
+```
+
+For a generic k=a, you can access to the results via\
+a \<- 5\
+result \<- knn_results[knn_results\$k == a, ]\
+As we can see, by increasing the value of k, the flexibility of the model is reduced and is increased both the train and test error.\
+We now run a multinominal logistic regression
+
+```{r}
+lModel <- multinom(y_train ~ ., data = zip_train[, 2:257], MaxNWts = 5000, maxit = 1000)
+test_estimate_multil <- predict(lModel, zip_test[, 2:257], type = "class")
+train_estimate_multil <- predict(lModel, zip_train[, 2:257], type = "class")
+test_error_multil <- 1 - sum(test_estimate_multil == y_test) / length(y_test)
+train_error_multil <- 1 - sum(train_estimate_multil == y_train) / length(y_train)
+train_error_multil
+test_error_multil
+```
+
+As we can see, because of the huge number of parameters the train error of the multinomial logistic regression is null, strong evidence that the model is overfitted. Indeed, the test error is much higher than the one of the knn model.
+
+```{r warning=FALSE}
+y_train_log <- ifelse(y_train == 2, 0, 1)
+y_test_log <- ifelse(y_test == 2, 0, 1)
+logistic <- glm(y_train_log ~ ., data = zip_train[, 2:257], family = binomial)
+test_estimate_log <- predict(logistic, zip_test[, 2:257], type = "response")
+train_estimate_log <- predict(logistic, zip_train[, 2:257], type = "response")
+length(test_estimate_log)
+length(train_estimate_log)
+contrasts(as.factor(y_train_log))
+```
+
+Recall that the output is a probability, so we're actually rounding the value.
+
+```{r}
+train_estimate_log <- ifelse(train_estimate_log < 0.5, 0, 1)
+test_estimate_log <- ifelse(test_estimate_log < 0.5, 0, 1)
+
+test_error_log <- 1 - sum(test_estimate_log == y_test_log) / length(y_test_log)
+train_error_log <- 1 - sum(train_estimate_log == y_train_log) / length(y_train_log)
+train_error_log
+test_error_log
+```
+
+Using a logistic regression we obtain a very high train error and test error.
+
+We now define a classifier from the OLS following a linear probability model (observed in the vector of coefficients).
+
+```{r}
+y_train_lm <- ifelse(y_train == 2, -1, 1)
+y_test_lm <- ifelse(y_test == 2, -1, 1)
+linear_model <- lm(y_train_lm ~ ., data = zip_train[, 2:257])
+test_estimate_lm <- predict(linear_model, zip_test[, 2:257])
+train_estimate_lm <- predict(linear_model, zip_train[, 2:257])
+train_estimate_lm <- ifelse(train_estimate_lm < 0, -1, 1)
+test_estimate_lm <- ifelse(test_estimate_lm < 0, -1, 1)
+
+test_error_lm <- 1 - sum(test_estimate_lm == y_test_lm) / length(y_test_lm)
+train_error_lm <- 1 - sum(train_estimate_lm == y_train_lm) / length(y_train_lm)
+train_error_lm
+test_error_lm
+
+regression_results <- data.frame(name_method = numeric(), train_error = numeric(), test_error = numeric(), stringsAsFactors = FALSE)
+regression_results <- rbind(
+    regression_results,
+    data.frame(
+        name_method = "multinomial logistic regression",
+        train_error = train_error_multil,
+        test_error = test_error_multil,
+        stringsAsFactors = FALSE
+    )
+)
+regression_results <- rbind(
+    regression_results,
+    data.frame(
+        name_method = "logistic regression",
+        train_error = train_error_log,
+        test_error = test_error_log,
+        stringsAsFactors = FALSE
+    )
+)
+regression_results <- rbind(
+    regression_results,
+    data.frame(
+        name_method = "linear model",
+        train_error = train_error_lm,
+        test_error = test_error_lm,
+        stringsAsFactors = FALSE
+    )
+)
+```
+
+Summary: invoke knn_results and regression_results
+
+To sum up, we have the following rank (ranking for test errors):\
+1) KNN with k = 1 (test error: 0.02472527; train error: 0)\
+2) KNN with k = 3 (test error: 0.03021978; train error:0.005039597)\
+3) KNN with k = 5 (test error: 0.03021978; train error: 0.005759539)\
+4) KNN with k = 7 (test error: 0.03296703; train error: 0.006479482)\
+5) KNN with k = 15 (test error: 0.03846154: train error:0.009359251)\
+6) OLS regression (test error: 0.04120879; train error: 0.005759539)\
+8) Logistic regression (test error: 0.05494505; train error: 0) overfit!\
+7) Multinomial logistic regression (test error: 0.06043956; train error:0) overfit!
+
+Noticeably, overfit models (except for KNN k=1) are performing worse than the others; Moreover, KNN models are all performing better than regression ones. When the flexibility of the model is reduced because of a higher k, the train error is increased and the test error increases as well, even if the variation is smaller than the train error.
+
+In order to reduce the number of parameters in the regression model, we might decide to pick just significant pixels (at the end of the day, we're just evaluating numbers that can be either 2 or 3, so it is not meaningful associating a beta different from zero to pixels that will never be reached, like those on the top left corner of the image for example). So we run the Lasso regression in order to perform feature selection.
+
+```{r}
+x_train <- model.matrix(y_train_lm ~ ., data = zip_train[, 2:257])[, -1]
+y_train = y_train_lm
+x_test <- model.matrix(y_test_lm ~ ., data = zip_test[, 2:257])[, -1]
+y_test <- y_test_lm
+
+lasso.mod <- cv.glmnet(as.matrix(zip_train[, 2:257]), y_train_lm, alpha = 1)
+best_lambda <- lasso.mod$lambda.min # we pick the smallest tuning parameter such that the model is not null
+lasso.coef <- predict(lasso.mod, type = "coefficients", s = best_lambda)
+```
+
+We now perform a regression with the non-null coefficients.
+
+```{r}
+train_estimate_lm_lasso <- predict(lasso.mod, newx = as.matrix(zip_train[, 2:257]), s = best_lambda)
+test_estimate_lm_lasso <- predict(lasso.mod, newx = as.matrix(zip_test[, 2:257]), s = best_lambda)
+
+test_estimate_lm_lasso <- ifelse(test_estimate_lm_lasso < 0, -1, 1)
+train_estimate_lm_lasso <- ifelse(train_estimate_lm_lasso < 0, -1, 1)
+
+test_error_lm_lasso <- 1 - sum(as.numeric(unlist(test_estimate_lm_lasso)) == y_test_lm) / length(y_test_lm)
+train_error_lm_lasso <- 1 - sum(as.numeric(unlist(train_estimate_lm_lasso)) == y_train_lm) / length(y_train_lm)
+
+train_error_lm_lasso
+test_error_lm_lasso
+
+regression_results <- rbind(
+    regression_results,
+    data.frame(
+        name_method = "lasso regression",
+        train_error = train_error_lm_lasso,
+        test_error = test_error_lm_lasso,
+        stringsAsFactors = FALSE
+    )
+)
+regression_results
+knn_results
+```
+
+Noticeably, the Lasso regression with tuning parameter 0.004254651 improved the linear model by reducing the testing error bringing it to 3.8% (from 4.1%): moreover, the training error is not null because of the reduced number of parameters. The curious finding is that the top-performing model in the linear regression setting is performing equivalently to the worst-performing model in the KNN setting (k=15) since they have the same test error. Above we have the tables of result.\
+#-------------------------------------------------------------------------------\
+\# Exercise 2 - Logistic Regression\
+In this exercise we predict the likelihood of a Shuttle disaster. This is an example showing that the Challenger disaster of January 28, 1986, might have been averted had NASA considered the warning signs. Our data (Nasa.csv) contain information about the first 25 flights of the U.S. space shuttle. For each flight, we observe the date (number of days since Jan 1st 1960), the temperature, and a measure of the number of thermal distress incidents occurred during the launch. We have three categories that describe the number of incidents: 1 = none, 2 = 1 or 2, 3 = 3 or more.
+
+```{r}
+set.seed(5)
+nasa_path <- paste0(getwd(), "/NASA.csv")
+data <- read.csv(nasa_path)
+attach(data)
+```
+
+a)  
+
+```{r}
+for (i in 1:25) {
+    if (distress[i] == "None") {
+        distress[i] <- "No Incident"
+    } else {
+        distress[i] <- "Incident"
+    }
+}
+```
+
+Here we are converting the distress variable to a factor (category). We fill all blank spaces from the original data with incident. This fills the table named data's lines 4 and 25 with incident, since it was a blank space, but by the description of the event we can understand that both cases represent at least one incident.\
+By creating the categorical variable incident/no incident, via logistic regression we're capable of returning a probability of the event happening.\
+b)
+
+```{r}
+distress <- as.factor(distress)
+glm.fits <- glm(distress ~ date + temp, family = binomial)
+summary(glm.fits)
+```
+
+```{r}
+contrasts(distress)
+```
+
+Looking at the coefficients, we see that only the predictor "date" is statistically significant, even if it is significant at 10% confidence level and it is very small in absolute value. Indeed, the fact that it is significantly different from zero is suggested by the very low standard-error rather than the size of the coefficient. Since the independent variable "date" accounts for the number of days since January 1960, this variable is always increasing in value as time goes by. The dependent variable in this case is a Dummy (1 for no-incident, 0 for incident). The negative coefficient, although small, indicates that as time goes by, the probability of having a distress incident increases.\
+c)
+
+```{r}
+glm.probs <- predict(glm.fits, type = "response")
+```
+
+type = "response" indicates that we want the predicted probabilities. This predict the probability of the response being Incident.\
+It indicates that R created a dummy variable with 1 for No Incident and 0 otherwise. We initialize a vector of just "Incident" values and we will replace the i-th term with "No Incident" if the matching index prediction on the training data returned a value higher than 0.5 (so that it can be rounded to 1 since via contrasts we've seen that the model is associating 1 for No Incident and 0 otherwise).
+
+```{r}
+glm.pred <- rep("Incident", 25)
+```
+
+Changing the values of the vector to No Incident if the probability is greater than 0.5.
+
+```{r}
+glm.pred[glm.probs > 0.5] <- "No Incident"
+table(glm.pred, distress) 
+```
+
+Confusion matrix. It indicates on the rows the predicted values and on the columns the true values. The main diag is the number of correct predictions. The anti diag is the number of incorrect predictions.\
+The model correctly predicts 19 out of 25 values. The error rate is 24% (quite high on a small sample).\
+d)
+
+```{r}
+year <- as.Date(rep(0, 25), format = "%m/%d/%Y", origin = "1960-01-01")
+for (i in 1:25) {
+    year[i] <- as.Date(date[i], origin = "1960-01-01")
+}
+```
+
+Extracting the year from the date
+
+```{r}
+year <- substring(year, 0, 4)
+```
+
+Imposing that the observations related to the years \< 1986 are considered as train.data.
+
+```{r}
+train <- (year < 1986)
+data.1986 <- data[!train, ]
+```
+
+Data from 1986 to end
+
+```{r}
+dim(data.1986)
+```
+
+We have 2 observations from the 1986
+
+```{r}
+distress.1986 <- distress[!train]
+```
+
+Distress value for the observations from 1986 to end
+
+```{r}
+for (i in 1:length(distress.1986)) {
+    if (distress.1986[i] == "None") {
+        distress.1986[i] <- "No Incident"
+    } else {
+        distress.1986[i] <- "Incident"
+    }
+}
+distress.1986 <- as.factor(distress.1986)
+distress.1986
+```
+
+Here we are selecting only the values of the variables related to the subset data.1986
+
+```{r}
+glm.fits2 <- glm(distress ~ date + temp, family = binomial, subset = train)
+summary(glm.fits2)
+```
+
+The coefficient of date is statistically significant and the estimates are very close to the estimates obtained before.
+
+```{r}
+glm.probs2 <- predict(glm.fits2, data.1986, type = "response")
+```
+
+We predict the probability of the response being Incident for the observations from 1986 to end using the data from 1960 to 1985 as training data.
+
+```{r}
+contrasts(distress)
+```
+
+We already know this result from the line 24, however we are repeating it to be sure.\
+Creating a vector of 2 Incidents values.
+
+```{r}
+glm.pred2 <- rep("Incident", 2)
+```
+
+Changing the values of the vector to No Incident if the probability is greater than 0.5.
+
+```{r}
+glm.pred2[glm.probs2 > 0.5] <- "No Incident"
+table(glm.pred2, distress.1986)
+```
+
+The model correctly predicts 2 out of 2 values. The error rate is 0%. This means that using the data from 1960 to 1985 as training data, the model was able to predict the values of the distress variable for the observations from 1986 to end. #-------------------------------------------------------------------------------\
+\# Exercise 3 - Linear Discriminant Analysis\
+In this exercise we predict the likelihood of a Shuttle disaster using the Linear Discriminant Analysis.\
+a)
+
+```{r}
+lda.fit <- lda(distress ~ date + temp, subset = train)
+lda.fit$prior
+```
+The prior probability to have an incident is 60.87% while the prior probability to have no incident is 39.13%.
+
+```{r}
+lda.fit$means
+```
+
+The group means are the average values of the predictors for each group.
+
+```{r}
+lda.fit$scaling
+```
+
+The coefficients obtained from the linear discriminant analysis are slightly different from the coefficients obtained from the logistic regression. On the other hand, the sign remains the same and also the magnitude in absolute value is very similar.
+
+```{r}
+lda.pred <- predict(lda.fit, data.1986)
+lda.class <- lda.pred$class
+table(lda.class, distress.1986)
+```
+
+The confusion matrix is equal to the confusion matrix of the logistic regression. Also in this case, the model correctly predicts 2 out of 2 values. The error rate is 0%. This means that using the data from 1960 to 1985 as training data, the model was able to predict the values of the distress variable for the observations from 1986 to end.\
+#-------------------------------------------------------------------------------\
+\# Exercise 4 - Quadratic Discriminant Analysis\
+In this exercise we predict the likelihood of a Shuttle disaster using the Quadratic Discriminant Analysis.\
+a)
+
+```{r}
+qda.fit <- qda(distress ~ date + temp, subset = train)
+qda.fit$prior
+```
+
+The prior probability to have an incident is 60.87% while the prior probability to have no incident is 39.13%.
+
+```{r}
+qda.fit$means
+```
+
+The Quadratic Discriminant Analysis doesn't provide the coefficients of the linear discriminants, since it follows a quadratic function.
+
+```{r}
+qda.class <- predict(qda.fit, data.1986)$class
+```
+
+Predicting the class of the observations from 1986 to end using the data from 1960 to 1985 as training data.
+
+```{r}
+table(qda.class, distress.1986)
+```
+
+The confusion matrix is equal to the confusion matrix of the logistic regression. Also in this case, the model correctly predicts 2 out of 2 values. The error rate is 0%. This means that using the data from 1960 to 1985 as training data, the model was able to predict the values of the distress variable for the observations from 1986 to end.\
+#-------------------------------------------------------------------------------\
+\# Exercise 5 - Non-parametric bootstrap Watch the pdf for details about this exercise.
+
+```{r}
+x <- rnorm(10000)
+mean.boot <- function(x, ind) {
+    mean(x[ind])
+}
+true_mean <- mean(x)
+```
+
+Generating a random normal distribution with 10000 observations and calculating the true mean = 0.001810254. Since we put seed = 5, the true mean will always be the same.
+
+```{r}
+num_obs <- c(10, 100, 1000, 10000)
+num_boot <- c(10, 100, 1000, 10000)
+```
+
+Creating a vector with the number of observations we want to use for the bootstrap.
+
+```{r}
+bias <- matrix(0, length(num_boot), length(num_obs))
+```
+
+Creating a matrix with 4 rows and 4 columns, all the values are 0. This matrix will contain the bias for each combination of number of observations and number of bootstrap.
+
+```{r}
+colnames(bias) <- c("10", "100", "1000", "10000")
+rownames(bias) <- c("10", "100", "1000", "10000")
+```
+
+Creating an empty matrix with number of rows = length(num_boot) and number of columns = length(num_obs).\
+We iterate over the sample size: at each cycle we generate the column of the table running the bootstrap with the sample size num_obs[i] for all the fraws (contained in num_boot).
+
+```{r}
+for (i in 1:length(num_obs)) {
+    for (j in 1:length(num_boot)) {
+        # Since we need to generate num_boot[j] bootstrap replicates (draws) with dimension num_obs[i] and apparently we're not allowed to set the dimension of the bootstrap replicate, so we sample a set of observations from x whose size corresponds to the desired size of the generic bootstrap replicate.
+        obs <- num_obs[i]
+        result <- boot(data = sample(x, obs), mean.boot, R = num_boot[j])
+        bias[j, i] <- mean(result$t) - result$t0
+    }
+}
+bias
+```
+
+We compute two cycles, the index j is related to the bootstrap draws while the index i is related to the number of observations in each draw. We create the function mean.boot in order to compute the mean of one bootstrap draw. We put it in the boot function in order to calculate the mean of all the bootstrap draws (the mean of the mean) and check the bias and the standard error. We fill the matrix bias with the bias for each combination of number of observations and number of bootstrap. result\$t is the mean of the mean of all the bootstrap draws and result\$t0 is the true mean.\
+As we can see, when the number of observations for each bootstrap draw is low, the bias is relatively high in modulus if compared to a case in which the number of observations of each bootstrap draw is high. This is due to the fact that when the number of observations is low, the bootstrap draws are not representative of the original sample and the mean of the mean is not close to the true mean. Of course this is true also for the number of bootstrap replicates: the higher is the number of bootstrap replicates, the lower is the bias. Merging these two considerations we understand that the minimum bias is located in the bottom right corner of the matrix, where the number of observations is high and the number of bootstrap replicates is high (but also the computational effort is extremely high, because you're generating 10.000 bootstrap replicates with 10.000 observations each).\
+#-------------------------------------------------------------------------------\
+\# Exercise 6 - Bootstrap Confidence Intervals\
+Watch the pdf for details about this exercise.\
+"result" here is the last result we obtained in the previous nested for ().\
+We create a regressor and a regressand, with some high variability of the errors in order to create noise in the observations (in order to challenge the estimation: it shouldn't be to difficult obtaining a nice estimation because under homoskedasticity assumption, the OLS is an efficient estimator of the slope, indipendently from the variability of the errors).
+
+```{r}
+size <- 1000
+true_intercept <- 0
+true_beta <- 2
+x <- rnorm(size, sd = 10)
+y <- true_intercept + true_beta * x + rnorm(size, sd = 10)
+```
+
+We assume that the true value of the slope is 2, so we run a OLS regression to estimate it.
+
+```{r}
+ols <- lm(y ~ x)
+summary(ols)
+```
+
+The estimated slope is also extremely statistically significant (p-value near to 0). We create a function that returns the OLS coefficients.
+
+```{r}
+ols.boot <- function(matrix, ind) {
+    y <- matrix[, 1]
+    x <- matrix[, 2]
+    ols <- lm(y[ind] ~ x[ind])
+    coef(ols)
+}
+```
+
+We run the bootstrap with 1000 bootstrap replicates, each one with 1000 observations.
+
+```{r}
+result <- boot(data = cbind(y, x), ols.boot, R = size)
+boot_intercept <- mean(result$t[, 1])
+boot_slope <- mean(result$t[, 2])
+
+bias_lm <- matrix(0, 2, 2)
+colnames(bias_lm) <- c("OLS", "Boot")
+rownames(bias_lm) <- c("Intercept", "Slope")
+bias_lm[1, 1] = ols$coefficients[1] - true_intercept
+bias_lm[1, 2] <- boot_intercept - true_intercept
+bias_lm[2, 1] <- ols$coefficients[2] - true_beta
+bias_lm[2, 2] <- boot_slope - true_beta
+bias_lm
+```
+
+As we can see, the difference between the two methods is neglectable.\
+Now we return just the intercept in order to compute the confidence intervals.
+
+```{r}
+ols.boot_beta <- function(matrix, ind) {
+    y <- matrix[, 1]
+    x <- matrix[, 2]
+    ols <- lm(y[ind] ~ x[ind])
+    ols$coefficients[2]
+}
+result_2 <- boot(data = cbind(y, x), ols.boot_beta, R = size)
+```
+
+In order to retrieve the confidence intervals of the bootstrap result (we expect wider intervals for higher confidence levels, because higher would be the probability of finding the true value inside such interval).
+
+```{r warning=FALSE}
+confidence_levels <- c(0.9, 0.95, 0.99)
+boot.ci(
+    conf = confidence_levels,
+    boot.out = result_2,
+    type = c(
+        "all"
+    )
+)
+```
+
+The coefficient of the original regression is significant based on the bootstrap confidence intervals because it is inside all of them.\
+We plot the distribution and the cutoffs for the confidence intervals we get:
+
+```{r message=FALSE, warning=FALSE}
+plot(result_2, main = "Distribution of the bootstrap slope")
+abline(v = ols$coefficients[2], col = "red")
+abline(v = mean(result_2$t[, 1]), col = "orange")
+abline(v = boot.ci(conf = 0.9, boot.out = result_2, type = c("all"))$basic[1], col = "blue")
+abline(v = boot.ci(conf = 0.95, boot.out = result_2, type = c("all"))$basic[1], col = "green")
+abline(v = boot.ci(conf = 0.99, boot.out = result_2, type = c("all"))$basic[1], col = "black")
+```
