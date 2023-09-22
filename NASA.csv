@@ -1,0 +1,26 @@
+distress,date,temp,flight,month,day,year,damage,comments
+None,7772,66,STS-1,4,12,1981,0,Coolest (66) launch without O-ring problems.
+1 or 2,7986,70,STS-2,11,12,1981,4,Extent of erosion not fully known.
+None,8116,69,STS-3,3,22,1982,0,
+,8213,80,STS-4,6,27,1982,,O-ring condition unknown; rocket casing lost at sea.
+None,8350,68,STS-5,11,11,1982,0,
+1 or 2,8494,67,STS-6,4,4,1983,0,
+None,8569,72,STS-7,6,18,1983,0,
+None,8642,73,STS-8,8,30,1983,0,
+None,8732,70,STS-9,11,28,1983,0,
+1 or 2,8799,57,STS_41-B,2,3,1984,4,"Deep, extensive erosion."
+3 plus,8862,63,STS_41-C,4,6,1984,2,"O-rings showed signs of heating, but no damage"
+3 plus,9008,70,STS_41-D,8,30,1984,4,
+None,9044,78,STS_41-G,10,5,1984,0,
+None,9078,67,STS_51-A,11,8,1984,0,
+3 plus,9155,53,STS_51-C,1,24,1985,11,Most erosion any flight; blow-by; back-up rings heated.
+3 plus,9233,67,STS_51-D,4,12,1985,0,
+3 plus,9250,75,STS_51-B,4,29,1985,0,
+3 plus,9299,70,STS_51-G,6,17,1985,0,
+1 or 2,9341,81,STS_51-F,7,29,1985,0,
+1 or 2,9370,76,STS_51-I,8,27,1985,0,
+None,9407,79,STS_51-J,10,3,1985,0,
+3 plus,9434,75,STS_61-A,10,30,1985,4,No erosion.  Soot found behind two primary O-rings.
+1 or 2,9461,76,STS_61-B,11,26,1985,0,
+3 plus,9508,58,STS_61-C,1,12,1986,4,O-ring erosion on launch two weeks before Challenger.
+,9524,31,STS_51-L,1,28,1986,,Challenger's last flight.
